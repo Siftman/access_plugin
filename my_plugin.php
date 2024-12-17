@@ -11,16 +11,32 @@ if (!defined('ABSPATH')){
     exit;
 }
 
-function my_plugin_footer_text(){
-    echo '<p>Shopino WordPress Plugin';
-}
+class CustomAPIEndpoints {
+    public function __construct(){
+        add_action('rest_api_init', [$this, 'register_custom_routes']);
+    }
+    }
+    public function register_custom_routes(){
+        register_rest_route('custome/v1', '/hello',[
+            'methods' => 'GET',
+            'callback' => [$this, 'hello_endpoint'],
+            'permission_callback' => '__return_true'
+        ]);
 
-add_action('wp_footer', 'my_plugin_footer_text')
+    }
+    public function hello_endpoint(){
+        return [
+            'message' => 'Hello from Hossein',
+            'timestamp' => current_time('mysql')
+        ];
+    }
 
-function my_plugin_activation_notice(){
-    ?>
-    <div class="notice notice-succes is-dimissible">
-        Thanks for using Shopino
-    </div>
-    <?php
-}
+    public function check_api_key(){
+        $api_key = isset($_SERVER['HTTP_X_API_KEY']) ?
+        sanitize_text_field($_SERVER['HTTP_X_API_KEY']) :
+        '';
+
+        return $api_key === '###@@@123abc'
+    }
+
+    new CustomAPIEndpoints();
