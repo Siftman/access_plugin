@@ -6,7 +6,11 @@
  * Version: 1.0.0
  * Author: Shopino Team
  * Author URI: https://shopino.app
+ * Plugin Icon: https://shopino.app/icons/512x512.png
  */
+
+// Include the logo file
+// require_once plugin_dir_path(__FILE__) . 'includes/logo.php';
 
 if (!defined('ABSPATH')) {
     exit;
