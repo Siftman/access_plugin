@@ -4,10 +4,9 @@
  * Plugin URI: http://shopino.app
  * Description: افزونه وردپرس شاپینو
  * Version: 1.0.0
- * Author: Hossein
- * Author URI: http://github.com/siftman
+ * Author: Shopino Team
+ * Author URI: https://shopino.app
  */
-
 
 if (!defined('ABSPATH')) {
     exit;
@@ -22,7 +21,17 @@ class CustomAPIEndpoints {
         register_rest_route('custome/v1', '/products', [
             'methods' => 'GET',
             'callback' => [$this, 'get_all_products'],
-            'permission_callback' => '__return_true'
+            'permission_callback' => function() {
+                return true;
+            }
+        ]);
+
+        register_rest_route('custome/v1', '/create-order', [
+            'methods' => 'POST',
+            'callback' => [$this, 'create_order'],
+            'permission_callback' => function() {
+                return true;
+            }
         ]);
     }
 
@@ -139,6 +148,85 @@ class CustomAPIEndpoints {
                    sanitize_text_field($_SERVER['HTTP_X_API_KEY']) : 
                    '';
         return $api_key === '###@@@123abc';
+    }
+
+    public function create_order($request) {
+        if (!class_exists('WooCommerce')) {
+            return new WP_Error(
+                'woocommerce_not_active',
+                'WooCommerce is not installed or activated',
+                ['status' => 500]
+            );
+        }
+
+        $params = $request->get_json_params();
+
+        $required_fields = ['billing', 'line_items'];
+        foreach ($required_fields as $field) {
+            if (!isset($params[$field])) {
+                return new WP_Error(
+                    'missing_required_field',
+                    "Missing required field: {$field}",
+                    ['status' => 400]
+                );
+            }
+        }
+
+        try {
+            $order = wc_create_order();
+
+            foreach ($params['line_items'] as $item) {
+                if (!isset($item['product_id'], $item['quantity'])) {
+                    continue;
+                }
+
+                $product = wc_get_product($item['product_id']);
+                if (!$product) {
+                    continue;
+                }
+
+                $order->add_product(
+                    $product,
+                    $item['quantity'],
+                    [
+                        'subtotal' => isset($item['subtotal']) ? $item['subtotal'] : '',
+                        'total' => isset($item['total']) ? $item['total'] : '',
+                    ]
+                );
+            }
+
+            $order->set_address($params['billing'], 'billing');
+
+            if (isset($params['shipping'])) {
+                $order->set_address($params['shipping'], 'shipping');
+            }
+
+            if (isset($params['payment_method'])) {
+                $order->set_payment_method($params['payment_method']);
+            }
+
+            $status = isset($params['status']) ? $params['status'] : 'pending';
+            $order->set_status($status);
+
+            $order->calculate_totals();
+
+            $order->save();
+
+            return [
+                'success' => true,
+                'order_id' => $order->get_id(),
+                'order_number' => $order->get_order_number(),
+                'status' => $order->get_status(),
+                'total' => $order->get_total()
+            ];
+
+        } catch (Exception $e) {
+            return new WP_Error(
+                'order_creation_failed',
+                $e->getMessage(),
+                ['status' => 500]
+            );
+        }
     }
 }
 
