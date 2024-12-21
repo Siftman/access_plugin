@@ -16,6 +16,8 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+define('shopino_api_key', 'skljfwlkfjbfek2843#@$$(Ywkfb');
+
 class CustomAPIEndpoints {
     public function __construct() {
         add_action('rest_api_init', [$this, 'register_custom_routes']);
@@ -25,30 +27,25 @@ class CustomAPIEndpoints {
         register_rest_route('api/v1', '/products', [
             'methods' => 'GET',
             'callback' => [$this, 'get_all_products'],
-            'permission_callback' => function() {
-                return true;
-            }
+            'permission_callback' => [$this, 'check_api_key'],
         ]);
 
         register_rest_route('api/v1', '/order', [
             'methods' => 'POST',
             'callback' => [$this, 'create_order'],
-            'permission_callback' => function() {
-                return true;
-            }
+            'permission_callback' => [$this, 'check_api_key'],
         ]);
     }
 
     public function get_all_products() {
-        if (!class_exists('WooCommerce')){
+        if (!class_exists('WooCommerce')) {
             return new WP_Error(
                 'woocommerce_not_active',
-                'woocommerce is not installed or activated',
+                'WooCommerce is not installed or activated',
                 ['status' => 500]
             );
         }
 
-        // Get pagination parameters
         $page = isset($_GET['page']) ? absint($_GET['page']) : 1;
         $per_page = isset($_GET['per_page']) ? absint($_GET['per_page']) : 10; 
 
@@ -70,7 +67,7 @@ class CustomAPIEndpoints {
                 $product_details = [
                     'id' => $product->get_id(),
                     'name' => $product->get_name(),
-                    'slug' => $product->get_slug(),
+                    'slug' => urldecode($product->get_slug()),
                     'permalink' => $product->get_permalink(),
                     'type' => $product->get_type(),
                     'price' => $product->get_price(),
@@ -92,12 +89,12 @@ class CustomAPIEndpoints {
             wp_reset_postdata();
         }
 
-        return [
+        return wp_json_encode([
             'total_products' => (int) $products_query->found_posts,
             'total_pages' => (int) ceil($products_query->found_posts / $per_page),
             'current_page' => $page,
             'products' => $products_data
-        ];
+        ], JSON_UNESCAPED_UNICODE);
     }
 
     private function get_product_images($product){
@@ -155,10 +152,8 @@ class CustomAPIEndpoints {
     }
 
     public function check_api_key() {
-        $api_key = isset($_SERVER['HTTP_X_API_KEY']) ? 
-                   sanitize_text_field($_SERVER['HTTP_X_API_KEY']) : 
-                   '';
-        return $api_key === '###@@@123abc';
+        $api_key = isset($_SERVER['HTTP_X_SHOPINO_API_KEY']) ? sanitize_text_field($_SERVER['HTTP_X_SHOPINO_API_KEY']) : '';
+        return $api_key === shopino_api_key;
     }
 
     public function create_order($request) {
