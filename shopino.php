@@ -22,7 +22,7 @@ class CustomAPIEndpoints {
     }
 
     public function register_custom_routes() {
-        register_rest_route('custome/v1', '/products', [
+        register_rest_route('api/v1', '/products', [
             'methods' => 'GET',
             'callback' => [$this, 'get_all_products'],
             'permission_callback' => function() {
@@ -30,7 +30,7 @@ class CustomAPIEndpoints {
             }
         ]);
 
-        register_rest_route('custome/v1', '/create-order', [
+        register_rest_route('api/v1', '/order', [
             'methods' => 'POST',
             'callback' => [$this, 'create_order'],
             'permission_callback' => function() {
@@ -48,18 +48,22 @@ class CustomAPIEndpoints {
             );
         }
 
+        // Get pagination parameters
+        $page = isset($_GET['page']) ? absint($_GET['page']) : 1;
+        $per_page = isset($_GET['per_page']) ? absint($_GET['per_page']) : 10; 
+
         $args = [
             'post_type' => 'product',
-            'posts_per_page' => -1,
-            'status' => 'publish'
+            'posts_per_page' => $per_page,
+            'paged' => $page,
+            'post_status' => 'publish'
         ];
 
         $products_query = new WP_Query($args);
         $products_data = [];
 
-        if ($products_query->have_posts()){
-            while ($products_query->have_posts()){
-
+        if ($products_query->have_posts()) {
+            while ($products_query->have_posts()) {
                 $products_query->the_post();
                 $product = wc_get_product(get_the_ID());
 
@@ -79,7 +83,8 @@ class CustomAPIEndpoints {
                     'description' => $product->get_description(),
                     'images' => $this->get_product_images($product),
                     'categories' => $this->get_product_categories($product),
-                    'attributes' => $this->get_product_attributes($product),];
+                    'attributes' => $this->get_product_attributes($product),
+                ];
 
                 $products_data[] = $product_details;
             }
@@ -88,7 +93,9 @@ class CustomAPIEndpoints {
         }
 
         return [
-            'total_products' => count($products_data),
+            'total_products' => (int) $products_query->found_posts,
+            'total_pages' => (int) ceil($products_query->found_posts / $per_page),
+            'current_page' => $page,
             'products' => $products_data
         ];
     }
