@@ -1,109 +1,75 @@
-# Shopino Access API Plugin
+# Shopino Plugin
 
-A WordPress plugin that provides secure API endpoints for WooCommerce data retrieval and order submission.
+## Overview
+
+The Shopino Plugin is a WordPress plugin designed to enhance e-commerce functionality by providing custom API endpoints for managing products and orders. This plugin integrates seamlessly with WooCommerce, allowing developers to interact with product data and create orders through RESTful API calls.
 
 ## Features
 
-- Secure API key authentication
-- Retrieve all WordPress posts
-- Retrieve all WooCommerce products with detailed information
-- Create WooCommerce orders programmatically
-- Easy-to-use admin interface for API key management
+- **Custom API Endpoints**: The plugin registers two main API endpoints:
+  - `GET /wp-json/custome/v1/products`: Retrieves a list of all published products.
+  - `POST /wp-json/custome/v1/create-order`: Creates a new order based on the provided billing and line item details.
 
-## Requirements
+- **Product Data Retrieval**: The plugin fetches comprehensive product details, including:
+  - ID, name, slug, permalink, type, price, stock status, and images.
+  - Categories and attributes associated with each product.
 
-- WordPress 5.6 or higher
-- PHP 7.4 or higher
-- WooCommerce 5.0 or higher
+- **Order Creation**: The plugin allows for the creation of orders with the following features:
+  - Validation of required fields (billing information and line items).
+  - Support for setting shipping addresses and payment methods.
+  - Automatic calculation of order totals.
 
 ## Installation
 
-1. Download the plugin files and upload them to your `/wp-content/plugins/shopino-access-api` directory
-2. Activate the plugin through the 'Plugins' menu in WordPress
-3. Go to the 'Shopino API' menu in your WordPress admin panel
-4. Copy your API key for use in external applications
+1. Download the Shopino Plugin files.
+2. Upload the plugin folder to the `/wp-content/plugins/` directory.
+3. Activate the plugin through the 'Plugins' menu in WordPress.
 
-## API Endpoints
+## Usage
 
-### Authentication
-
-All API requests must include the following header:
-```
-X-Shopino-API-Key: your_api_key
-```
-
-### Available Endpoints
+### API Endpoints
 
 #### Get All Products
-```
-GET /wp-json/shopino/v1/products
-```
 
-Response includes:
-- Product ID
-- Name
-- Description
-- Price information
-- Stock status
-- Categories
-- Images
-- And more...
-
-#### Get All Posts
-```
-GET /wp-json/shopino/v1/posts
-```
-
-Response includes:
-- Post ID
-- Title
-- Content
-- Excerpt
-- Featured image
-- Categories
-- Tags
-- Publication date
+- **Endpoint**: `GET /wp-json/custome/v1/products`
+- **Response**: Returns a JSON object containing the total number of products and an array of product details.
 
 #### Create Order
-```
-POST /wp-json/shopino/v1/orders
-```
 
-Required parameters:
+- **Endpoint**: `POST /wp-json/custome/v1/create-order`
+- **Request Body**: A JSON object containing:
+  - `billing`: An object with billing details.
+  - `line_items`: An array of items to be included in the order, each containing `product_id` and `quantity`.
+  - Optional fields: `shipping`, `payment_method`, and `status`.
+
+- **Response**: Returns a JSON object indicating success and details of the created order, including `order_id`, `order_number`, and `total`.
+
+### Example Request to Create an Order
+#### json
 ```json
+POST /wp-json/custome/v1/create-order   
 {
-    "customer_email": "customer@example.com",
-    "items": [
-        {
-            "product_id": 123,
-            "quantity": 1
-        }
-    ]
+"billing": {
+"first_name": "John",
+"last_name": "Doe",
+"address_1": "123 Main St",
+"city": "Anytown",
+"state": "CA",
+"postcode": "90210",
+"country": "US",
+"email": "john.doe@example.com",
+"phone": "1234567890"
+},
+"line_items": [
+{
+"product_id": 123,
+"quantity": 2
+}
+]
 }
 ```
 
-Optional parameters:
-```json
-{
-    "customer_data": {
-        "first_name": "John",
-        "last_name": "Doe",
-        "address_1": "123 Main St",
-        "city": "Example City",
-        "state": "EX",
-        "postcode": "12345",
-        "country": "US",
-        "phone": "123-456-7890"
-    }
-}
-```
+## Requirements
 
-## Security
-
-- All endpoints are protected with API key authentication
-- API keys can be regenerated at any time through the admin interface
-- HTTPS is strongly recommended for all API communications
-
-## Support
-
-For support or feature requests, please open an issue in the GitHub repository.
+- WordPress 5.0 or higher
+- WooCommerce 3.0 or higher

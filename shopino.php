@@ -6,63 +6,89 @@
  * Version: 1.0.0
  * Author: Shopino Team
  * Author URI: https://shopino.app
+ * Plugin Icon: https://shopino.app/icons/512x512.png
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class CustomAPIEndpoints {
+define('SHOPINO_API_KEY', 'skljfwlkfjbfek2843#@$$(Ywkfb');
+define('SHOPINO_API_NAMESPACE', 'api/v1');
+
+abstract class ShopinoBaseAPI {
+    public function check_api_key() {
+        $api_key = isset($_SERVER['HTTP_X_SHOPINO_API_KEY']) ? sanitize_text_field($_SERVER['HTTP_X_SHOPINO_API_KEY']) : '';
+        return $api_key === SHOPINO_API_KEY;
+    }
+
+    public function check_woocommerce() {
+        if (!class_exists('WooCommerce')) {
+            return new WP_Error(
+                'woocommerce_not_active',
+                'WooCommerce is not installed or activated',
+                ['status' => 500]
+            );
+        }
+        return true;
+    }
+}
+
+class CustomAPIEndpoints extends ShopinoBaseAPI {
+    public $webhook_option_name = 'shopino_webhook_data';
+
     public function __construct() {
         add_action('rest_api_init', [$this, 'register_custom_routes']);
     }
 
     public function register_custom_routes() {
-        register_rest_route('custome/v1', '/products', [
+        register_rest_route(SHOPINO_API_NAMESPACE, '/products', [
             'methods' => 'GET',
             'callback' => [$this, 'get_all_products'],
-            'permission_callback' => function() {
-                return true;
-            }
+            'permission_callback' => [$this, 'check_api_key'],
         ]);
 
-        register_rest_route('custome/v1', '/create-order', [
+        register_rest_route(SHOPINO_API_NAMESPACE, '/order', [
             'methods' => 'POST',
             'callback' => [$this, 'create_order'],
-            'permission_callback' => function() {
-                return true;
-            }
+            'permission_callback' => [$this, 'check_api_key'],
+        ]);
+
+        register_rest_route(SHOPINO_API_NAMESPACE, '/webhook-key', [
+            'methods' => 'GET',
+            'callback' => [$this, 'get_or_create_webhook'],
+            'permission_callback' => [$this, 'check_api_key'],
         ]);
     }
 
     public function get_all_products() {
-        if (!class_exists('WooCommerce')){
-            return new WP_Error(
-                'woocommerce_not_active',
-                'woocommerce is not installed or activated',
-                ['status' => 500]
-            );
+        $wc_check = $this->check_woocommerce();
+        if (is_wp_error($wc_check)) {
+            return $wc_check;
         }
+
+        $page = isset($_GET['page']) ? absint($_GET['page']) : 1;
+        $per_page = isset($_GET['per_page']) ? absint($_GET['per_page']) : 10; 
 
         $args = [
             'post_type' => 'product',
-            'posts_per_page' => -1,
-            'status' => 'publish'
+            'posts_per_page' => $per_page,
+            'paged' => $page,
+            'post_status' => 'publish'
         ];
 
         $products_query = new WP_Query($args);
         $products_data = [];
 
-        if ($products_query->have_posts()){
-            while ($products_query->have_posts()){
-
+        if ($products_query->have_posts()) {
+            while ($products_query->have_posts()) {
                 $products_query->the_post();
                 $product = wc_get_product(get_the_ID());
 
                 $product_details = [
                     'id' => $product->get_id(),
                     'name' => $product->get_name(),
-                    'slug' => $product->get_slug(),
+                    'slug' => urldecode($product->get_slug()),
                     'permalink' => $product->get_permalink(),
                     'type' => $product->get_type(),
                     'price' => $product->get_price(),
@@ -75,7 +101,8 @@ class CustomAPIEndpoints {
                     'description' => $product->get_description(),
                     'images' => $this->get_product_images($product),
                     'categories' => $this->get_product_categories($product),
-                    'attributes' => $this->get_product_attributes($product),];
+                    'attributes' => $this->get_product_attributes($product),
+                ];
 
                 $products_data[] = $product_details;
             }
@@ -83,10 +110,12 @@ class CustomAPIEndpoints {
             wp_reset_postdata();
         }
 
-        return [
-            'total_products' => count($products_data),
+        return wp_json_encode([
+            'total_products' => (int) $products_query->found_posts,
+            'total_pages' => (int) ceil($products_query->found_posts / $per_page),
+            'current_page' => $page,
             'products' => $products_data
-        ];
+        ], JSON_UNESCAPED_UNICODE);
     }
 
     private function get_product_images($product){
@@ -143,20 +172,10 @@ class CustomAPIEndpoints {
         return $attributes;
     }
 
-    public function check_api_key() {
-        $api_key = isset($_SERVER['HTTP_X_API_KEY']) ? 
-                   sanitize_text_field($_SERVER['HTTP_X_API_KEY']) : 
-                   '';
-        return $api_key === '###@@@123abc';
-    }
-
     public function create_order($request) {
-        if (!class_exists('WooCommerce')) {
-            return new WP_Error(
-                'woocommerce_not_active',
-                'WooCommerce is not installed or activated',
-                ['status' => 500]
-            );
+        $wc_check = $this->check_woocommerce();
+        if (is_wp_error($wc_check)) {
+            return $wc_check;
         }
 
         $params = $request->get_json_params();
@@ -228,6 +247,66 @@ class CustomAPIEndpoints {
             );
         }
     }
+
+    public function get_or_create_webhook() {
+        $wc_check = $this->check_woocommerce();
+        if (is_wp_error($wc_check)) {
+            return $wc_check;
+        }
+
+        try {
+            $existing_webhook_data = get_option($this->webhook_option_name);
+            
+            if ($existing_webhook_data) {
+                $webhook = wc_get_webhook($existing_webhook_data['id']);
+                if ($webhook && $webhook->get_status() === 'active') {
+                    return [
+                        'success' => true,
+                        'webhook_id' => $existing_webhook_data['id'],
+                        'secret' => $existing_webhook_data['secret']
+                    ];
+                }
+            }
+
+            $webhook = new WC_Webhook();
+            $webhook->set_name('Shopino Integration Webhook');
+            $webhook->set_topic('order.created');
+            $webhook->set_delivery_url('https://localhost:8888/api/webhook/woocommerce');
+            $webhook->set_status('active');
+            $webhook->set_user_id(get_current_user_id());
+            
+            // Generate a unique secret
+            $secret = wp_generate_password(50, true, true);
+            $webhook->set_secret($secret);
+            
+            $webhook->save();
+
+            if (!$webhook->get_id()) {
+                throw new Exception('Failed to create webhook');
+            }
+
+            // Store webhook data
+            $webhook_data = [
+                'id' => $webhook->get_id(),
+                'secret' => $secret
+            ];
+            update_option($this->webhook_option_name, $webhook_data);
+
+            return [
+                'success' => true,
+                'webhook_id' => $webhook->get_id(),
+                'secret' => $secret
+            ];
+
+        } catch (Exception $e) {
+            return new WP_Error(
+                'webhook_creation_failed',
+                $e->getMessage(),
+                ['status' => 500]
+            );
+        }
+    }
 }
 
+// Initialize the plugin
 new CustomAPIEndpoints();
