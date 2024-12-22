@@ -255,47 +255,48 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
         }
 
         try {
-            $existing_webhook_data = get_option($this->webhook_option_name);
-            
-            if ($existing_webhook_data) {
-                $webhook = wc_get_webhook($existing_webhook_data['id']);
-                if ($webhook && $webhook->get_status() === 'active') {
-                    return [
-                        'success' => true,
-                        'webhook_id' => $existing_webhook_data['id'],
-                        'secret' => $existing_webhook_data['secret']
-                    ];
+            $existing_webhooks = get_option($this->webhook_option_name, []);
+            $webhook_ids = [];
+
+            $topics = ['product.created', 'product.updated', 'product.deleted', 'product.restored'];
+
+            foreach ($topics as $topic) {
+                if (isset($existing_webhooks[$topic])) {
+                    $webhook = wc_get_webhook($existing_webhooks[$topic]['id']);
+                    if ($webhook && $webhook->get_status() === 'active') {
+                        $webhook_ids[$topic] = [
+                            'id' => $existing_webhooks[$topic]['id'],
+                            'secret' => $existing_webhooks[$topic]['secret']
+                        ];
+                        continue;
+                    }
                 }
+
+                $webhook = new WC_Webhook();
+                $webhook->set_name('Shopino Integration Webhook for ' . $topic);
+                $webhook->set_topic($topic);
+                $webhook->set_delivery_url('https://search.shopino.app/staging/api/webhook/woocommerce');
+                $webhook->set_status('active');
+                $webhook->set_user_id(get_current_user_id());
+
+                $secret = wp_generate_password(50, true, true);
+                $webhook->set_secret($secret);
+
+                $webhook->save();
+
+                if (!$webhook->get_id()) {
+                    throw new Exception('Failed to create webhook for ' . $topic);
+                }
+                $webhook_ids[$topic] = [
+                    'id' => $webhook->get_id(),
+                    'secret' => $secret
+                ];
             }
-
-            $webhook = new WC_Webhook();
-            $webhook->set_name('Shopino Integration Webhook');
-            $webhook->set_topic('order.created');
-            $webhook->set_delivery_url('https://localhost:8888/api/webhook/woocommerce');
-            $webhook->set_status('active');
-            $webhook->set_user_id(get_current_user_id());
-            
-            // Generate a unique secret
-            $secret = wp_generate_password(50, true, true);
-            $webhook->set_secret($secret);
-            
-            $webhook->save();
-
-            if (!$webhook->get_id()) {
-                throw new Exception('Failed to create webhook');
-            }
-
-            // Store webhook data
-            $webhook_data = [
-                'id' => $webhook->get_id(),
-                'secret' => $secret
-            ];
-            update_option($this->webhook_option_name, $webhook_data);
+            update_option($this->webhook_option_name, $webhook_ids);
 
             return [
                 'success' => true,
-                'webhook_id' => $webhook->get_id(),
-                'secret' => $secret
+                'webhooks' => $webhook_ids
             ];
 
         } catch (Exception $e) {
@@ -308,5 +309,4 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
     }
 }
 
-// Initialize the plugin
 new CustomAPIEndpoints();
