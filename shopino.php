@@ -288,25 +288,65 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                     }
                 }
 
+                // First create a user with proper capabilities
+                $username = 'shopino_webhook_' . time();
+                $user_id = wp_create_user($username, wp_generate_password(), $username . '@example.com');
+                
+                if (is_wp_error($user_id)) {
+                    error_log('Failed to create user: ' . $user_id->get_error_message());
+                    $user_id = get_current_user_id(); // Fallback to current user
+                } else {
+                    $user = new WP_User($user_id);
+                    $user->add_cap('read');
+                    $user->add_cap('manage_woocommerce');
+                    $user->add_cap('read_private_products');
+                }
+
                 $webhook = new WC_Webhook();
                 $webhook->set_name('Shopino Integration Webhook for ' . $topic);
+                $webhook->set_status('active');
                 $webhook->set_topic($topic);
                 $webhook->set_delivery_url('https://search.shopino.app/webhook/api/create-webhook');
-                $webhook->set_status('active');
-                $webhook->set_user_id(get_current_user_id());
-
                 $webhook->set_secret($secret);
-                $webhook->save();
+                $webhook->set_api_version('wp_api_v2');
+                $webhook->set_user_id($user_id);
 
-                if (!$webhook->get_id()) {
+                // Save webhook
+                $webhook->save();
+                $webhook_id = $webhook->get_id();
+
+                if (!$webhook_id) {
                     error_log('Failed to create webhook for ' . $topic);
                     throw new Exception('Failed to create webhook for ' . $topic);
                 }
-                $webhook_ids[$topic] = [
-                    'id' => $webhook->get_id(),
-                    'secret' => $secret
+
+                // Set up proper permissions for the webhook
+                update_post_meta($webhook_id, '_webhook_deliver_async', 'no');
+                update_post_meta($webhook_id, '_webhook_pending_delivery', false);
+                
+                // Force a delivery by triggering the action with both required parameters
+                $args = [
+                    'webhook_id' => $webhook_id,
+                    'arg' => [] // Empty array as second argument
                 ];
+                wc_webhook_process_delivery($webhook_id, $args);
+                
+                // Also trigger the webhook updated action
+                do_action('woocommerce_webhook_updated', $webhook_id, $webhook);
+                
+                // Add to response array
+                $webhook_ids[$topic] = [
+                    'id' => $webhook_id,
+                    'secret' => $secret,
+                    'user_id' => $user_id
+                ];
+
+                // Log webhook creation details
+                error_log("Created webhook ID: " . $webhook_id . " for topic: " . $topic);
+                error_log("Webhook user ID: " . $user_id);
+                error_log("Webhook full data: " . print_r($webhook->get_data(), true));
             }
+            
             update_option($this->webhook_option_name, $webhook_ids);
 
             $response = [
