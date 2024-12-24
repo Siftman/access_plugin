@@ -13,13 +13,20 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('SHOPINO_API_KEY', 'skljfwlkfjbfek2843#@$$(Ywkfb');
+define('SHOPINO_API_KEY', 'Gx4dR8aLpM2oNcI5kEeJ7fH6gYb4nM3');
 define('SHOPINO_API_NAMESPACE', 'api/v1');
 
 abstract class ShopinoBaseAPI {
     public function check_api_key() {
-        $api_key = isset($_SERVER['HTTP_X_SHOPINO_API_KEY']) ? sanitize_text_field($_SERVER['HTTP_X_SHOPINO_API_KEY']) : '';
-        return $api_key === SHOPINO_API_KEY;
+        
+        $api_key = sanitize_text_field($_SERVER['HTTP_X_SHOPINO_API_KEY'] ?? '');
+        error_log("API Key: " . $api_key);
+        error_log("Request Headers: " . print_r($_SERVER, true));
+        if ($api_key !== SHOPINO_API_KEY) {
+            error_log("Invalid API Key: " . $api_key);
+            return false;
+        }
+        return true;
     }
 
     public function check_woocommerce() {
@@ -55,7 +62,7 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
         ]);
 
         register_rest_route(SHOPINO_API_NAMESPACE, '/webhook-key', [
-            'methods' => 'GET',
+            'methods' => 'POST',
             'callback' => [$this, 'get_or_create_webhook'],
             'permission_callback' => [$this, 'check_api_key'],
         ]);
@@ -254,6 +261,15 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
             return $wc_check;
         }
 
+        $params = json_decode(file_get_contents('php://input'), true);
+        $secret = isset($params['secret']) ? sanitize_text_field($params['secret']) : '';
+
+        error_log("Received secret: " . $secret);
+
+        if (empty($secret)) {
+            return new WP_Error('invalid_secret', 'Secret cannot be empty', ['status' => 400]);
+        }
+
         try {
             $existing_webhooks = get_option($this->webhook_option_name, []);
             $webhook_ids = [];
@@ -275,16 +291,15 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                 $webhook = new WC_Webhook();
                 $webhook->set_name('Shopino Integration Webhook for ' . $topic);
                 $webhook->set_topic($topic);
-                $webhook->set_delivery_url('https://search.shopino.app/staging/api/webhook/woocommerce');
+                $webhook->set_delivery_url('https://search.shopino.app/webhook/api/create-webhook');
                 $webhook->set_status('active');
                 $webhook->set_user_id(get_current_user_id());
 
-                $secret = wp_generate_password(50, true, true);
                 $webhook->set_secret($secret);
-
                 $webhook->save();
 
                 if (!$webhook->get_id()) {
+                    error_log('Failed to create webhook for ' . $topic);
                     throw new Exception('Failed to create webhook for ' . $topic);
                 }
                 $webhook_ids[$topic] = [
@@ -294,10 +309,12 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
             }
             update_option($this->webhook_option_name, $webhook_ids);
 
-            return [
+            $response = [
                 'success' => true,
                 'webhooks' => $webhook_ids
             ];
+            error_log("Response: " . json_encode($response));
+            return $response;
 
         } catch (Exception $e) {
             return new WP_Error(
