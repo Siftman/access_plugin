@@ -357,7 +357,7 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
 
                 $delivery_args = [
                     'webhook_id' => $webhook_id,
-                    'arg' => [] // Empty array as second argument
+                    'arg' => [] 
                 ];
                 wc_webhook_process_delivery($webhook_id, $delivery_args);
                 
