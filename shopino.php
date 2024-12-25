@@ -288,13 +288,12 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                     }
                 }
 
-                // First create a user with proper capabilities
                 $username = 'shopino_webhook_' . time();
                 $user_id = wp_create_user($username, wp_generate_password(), $username . '@example.com');
                 
                 if (is_wp_error($user_id)) {
                     error_log('Failed to create user: ' . $user_id->get_error_message());
-                    $user_id = get_current_user_id(); // Fallback to current user
+                    $user_id = get_current_user_id(); 
                 } else {
                     $user = new WP_User($user_id);
                     $user->add_cap('read');
@@ -310,8 +309,7 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                 $webhook->set_secret($secret);
                 $webhook->set_api_version('wp_api_v2');
                 $webhook->set_user_id($user_id);
-
-                // Save webhook
+                
                 $webhook->save();
                 $webhook_id = $webhook->get_id();
 
@@ -320,28 +318,56 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                     throw new Exception('Failed to create webhook for ' . $topic);
                 }
 
-                // Set up proper permissions for the webhook
                 update_post_meta($webhook_id, '_webhook_deliver_async', 'no');
                 update_post_meta($webhook_id, '_webhook_pending_delivery', false);
                 
-                // Force a delivery by triggering the action with both required parameters
+                do_action('woocommerce_webhook_updated', $webhook_id, $webhook);
+
+                $payload = json_encode(['webhook_id' => $webhook_id]);
+                $delivery_id = time();
+                
                 $args = [
+                    'method' => 'POST',
+                    'timeout' => 60,
+                    'redirection' => 5,
+                    'httpversion' => '1.0',
+                    'blocking' => true,
+                    'body' => $payload,
+                    'headers' => [
+                        'Content-Type' => 'application/json',
+                        'X-WC-Webhook-Source' => home_url('/'),
+                        'X-WC-Webhook-Topic' => $topic,
+                        'X-WC-Webhook-Resource' => 'product',
+                        'X-WC-Webhook-Event' => 'ping',
+                        'X-WC-Webhook-Signature' => base64_encode(hash_hmac('sha256', $payload, $secret, true)),
+                        'X-WC-Webhook-ID' => $webhook_id,
+                        'X-WC-Webhook-Delivery-ID' => $delivery_id,
+                    ],
+                ];
+                
+                $response = wp_remote_post($webhook->get_delivery_url(), $args);
+                
+                if (is_wp_error($response)) {
+                    error_log("Initial ping failed for webhook ID " . $webhook_id . ": " . $response->get_error_message());
+                } else {
+                    $response_code = wp_remote_retrieve_response_code($response);
+                    error_log("Initial ping response for webhook ID " . $webhook_id . ": " . $response_code);
+                    error_log("Initial ping response body: " . wp_remote_retrieve_body($response));
+                }
+
+                $delivery_args = [
                     'webhook_id' => $webhook_id,
                     'arg' => [] // Empty array as second argument
                 ];
-                wc_webhook_process_delivery($webhook_id, $args);
+                wc_webhook_process_delivery($webhook_id, $delivery_args);
                 
-                // Also trigger the webhook updated action
-                do_action('woocommerce_webhook_updated', $webhook_id, $webhook);
-                
-                // Add to response array
                 $webhook_ids[$topic] = [
                     'id' => $webhook_id,
                     'secret' => $secret,
-                    'user_id' => $user_id
+                    'user_id' => $user_id,
+                    'ping_response' => $response_code ?? null
                 ];
 
-                // Log webhook creation details
                 error_log("Created webhook ID: " . $webhook_id . " for topic: " . $topic);
                 error_log("Webhook user ID: " . $user_id);
                 error_log("Webhook full data: " . print_r($webhook->get_data(), true));
