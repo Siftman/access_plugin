@@ -323,7 +323,11 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                 
                 do_action('woocommerce_webhook_updated', $webhook_id, $webhook);
 
-                $payload = json_encode(['webhook_id' => $webhook_id]);
+                $domain_name = parse_url(home_url(), PHP_URL_HOST);
+                $payload = json_encode([
+                    'webhook_id' => $webhook_id,
+                    'domain_name' => $domain_name
+                ]);
                 $delivery_id = time();
                 
                 $args = [
@@ -349,10 +353,21 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                 
                 if (is_wp_error($response)) {
                     error_log("Initial ping failed for webhook ID " . $webhook_id . ": " . $response->get_error_message());
-                } else {
-                    $response_code = wp_remote_retrieve_response_code($response);
-                    error_log("Initial ping response for webhook ID " . $webhook_id . ": " . $response_code);
-                    error_log("Initial ping response body: " . wp_remote_retrieve_body($response));
+                    $webhook->delete(true);
+                    continue;
+                } 
+                
+                $response_code = wp_remote_retrieve_response_code($response);
+                error_log("Initial ping response for webhook ID " . $webhook_id . ": " . $response_code);
+                error_log("Initial ping response body: " . wp_remote_retrieve_body($response));
+
+                if ($response_code !== 200) {
+                    error_log("Webhook ping failed with status " . $response_code . ". Deleting webhook.");
+                    $webhook->delete(true);
+                    if (isset($user_id)) {
+                        wp_delete_user($user_id);
+                    }
+                    continue;
                 }
 
                 $delivery_args = [
@@ -365,7 +380,7 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                     'id' => $webhook_id,
                     'secret' => $secret,
                     'user_id' => $user_id,
-                    'ping_response' => $response_code ?? null
+                    'ping_response' => $response_code
                 ];
 
                 error_log("Created webhook ID: " . $webhook_id . " for topic: " . $topic);
