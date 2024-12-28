@@ -288,17 +288,37 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                     }
                 }
 
-                $username = 'shopino_webhook_' . time();
-                $user_id = wp_create_user($username, wp_generate_password(), $username . '@example.com');
-                
-                if (is_wp_error($user_id)) {
-                    error_log('Failed to create user: ' . $user_id->get_error_message());
-                    $user_id = get_current_user_id(); 
-                } else {
-                    $user = new WP_User($user_id);
-                    $user->add_cap('read');
-                    $user->add_cap('manage_woocommerce');
-                    $user->add_cap('read_private_products');
+                $max_retries = 5;
+                $retry_count = 0;
+                $user_id = null;
+
+                while ($retry_count < $max_retries && !is_numeric($user_id)) {
+                    $username = 'shopino_webhook_' . time() . '_' . $retry_count;
+                    $user_result = wp_create_user($username, wp_generate_password(), $username . '@example.com');
+
+                    if (!is_wp_error($user_result)) {
+                        $user_id = $user_result;
+                        $user = new WP_User($user_id);
+                        $user->add_cap('read');
+                        $user->add_cap('manage_woocommerce');
+                        $user->add_cap('read_private_products');
+                        break;
+                    } else {
+                        error_log('Failed to create user: ' . $user_result->get_error_message());
+                        $retry_count++;
+                        if ($retry_count < $max_retries) {
+                            sleep(1);
+                        }
+                    }
+                }
+
+                if (!is_numeric($user_id)) {
+                    error_log("User creation failed after {$max_retries} attempts for topic: " . $topic);
+                    return new WP_Error(
+                        'user_creation_failed',
+                        'User creation failed after multiple attempts.',
+                        ['status' => 502]
+                    );
                 }
 
                 $webhook = new WC_Webhook();
@@ -350,7 +370,7 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                     error_log("Initial ping failed for webhook ID " . $webhook_id . ": " . $response->get_error_message());
                     $webhook->delete(true);
                     continue;
-                } 
+                }
                 
                 $response_code = wp_remote_retrieve_response_code($response);
                 error_log("Initial ping response for webhook ID " . $webhook_id . ": " . $response_code);
@@ -388,7 +408,7 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                 'webhooks' => $webhook_ids
             ];
             error_log("Response: " . json_encode($response));
-            return $response;
+            return rest_ensure_response($response);
 
         } catch (Exception $e) {
             return new WP_Error(
