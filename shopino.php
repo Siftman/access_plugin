@@ -318,11 +318,6 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                     throw new Exception('Failed to create webhook for ' . $topic);
                 }
 
-                update_post_meta($webhook_id, '_webhook_deliver_async', 'no');
-                update_post_meta($webhook_id, '_webhook_pending_delivery', false);
-                
-                do_action('woocommerce_webhook_updated', $webhook_id, $webhook);
-
                 $domain_name = parse_url(home_url(), PHP_URL_HOST);
                 $payload = json_encode([
                     'webhook_id' => $webhook_id,
@@ -362,20 +357,15 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                 error_log("Initial ping response body: " . wp_remote_retrieve_body($response));
 
                 if ($response_code !== 200) {
-                    error_log("Webhook ping failed with status " . $response_code . ". Not creating webhook.");
+                    error_log("Webhook ping failed with status " . $response_code . ". Not creating any webhooks.");
+                    $webhook->delete(true);
                     return new WP_Error(
                         'webhook_creation_failed',
                         'Webhook creation failed due to server error.',
-                        ['status' => 502] 
+                        ['status' => 502]
                     );
                 }
 
-                $delivery_args = [
-                    'webhook_id' => $webhook_id,
-                    'arg' => [] 
-                ];
-                wc_webhook_process_delivery($webhook_id, $delivery_args);
-                
                 $webhook_ids[$topic] = [
                     'id' => $webhook_id,
                     'secret' => $secret,
@@ -388,7 +378,10 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                 error_log("Webhook full data: " . print_r($webhook->get_data(), true));
             }
             
-            update_option($this->webhook_option_name, $webhook_ids);
+            
+            if (!empty($webhook_ids)) {
+                update_option($this->webhook_option_name, $webhook_ids);
+            }
 
             $response = [
                 'success' => true,
