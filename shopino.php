@@ -362,12 +362,12 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                 error_log("Initial ping response body: " . wp_remote_retrieve_body($response));
 
                 if ($response_code !== 200) {
-                    error_log("Webhook ping failed with status " . $response_code . ". Deleting webhook.");
-                    $webhook->delete(true);
-                    if (isset($user_id)) {
-                        wp_delete_user($user_id);
-                    }
-                    continue;
+                    error_log("Webhook ping failed with status " . $response_code . ". Not creating webhook.");
+                    return new WP_Error(
+                        'webhook_creation_failed',
+                        'Webhook creation failed due to server error.',
+                        ['status' => 502] 
+                    );
                 }
 
                 $delivery_args = [
