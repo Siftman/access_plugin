@@ -13,20 +13,120 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('SHOPINO_API_KEY', 'Gx4dR8aLpM2oNcI5kEeJ7fH6gYb4nM3');
 define('SHOPINO_API_NAMESPACE', 'api/v1');
+define('SHOPINO_PUBLIC_KEY_E', '65537');
+define('SHOPINO_PUBLIC_KEY_PEM', "-----BEGIN PUBLIC KEY-----\nMFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAOYF0J3c21uSkXouUmVBXcFWhntOpI+L
+1KdcW6YMeZmsoW/jQXhtjVBG/s9drEZvXwh1FY+a7fVME9Wt0yIvFEkCAwEAAQ==\n-----END PUBLIC KEY-----");
 
 abstract class ShopinoBaseAPI {
-    public function check_api_key() {
+
+    public function verify_signature($payload, $signature) {
+        error_log("=== Starting signature verification ===");
+        error_log("Payload: " . $payload);
+        error_log("Signature: " . $signature);
         
-        $api_key = sanitize_text_field($_SERVER['HTTP_X_SHOPINO_API_KEY'] ?? '');
-        error_log("API Key: " . $api_key);
-        error_log("Request Headers: " . print_r($_SERVER, true));
-        if ($api_key !== SHOPINO_API_KEY) {
-            error_log("Invalid API Key: " . $api_key);
+        try {
+            $signature_binary = base64_decode($signature);
+            if ($signature_binary === false) {
+                error_log("Failed to decode base64 signature");
+                return false;
+            }
+            error_log("Decoded signature (hex): " . bin2hex($signature_binary));
+            
+            $signature_decimal = $this->binary_to_decimal($signature_binary);
+            error_log("Signature decimal: " . $signature_decimal);
+            
+            $e = SHOPINO_PUBLIC_KEY_E;  
+            $n = $this->binary_to_decimal(base64_decode(SHOPINO_PUBLIC_KEY_PEM));
+            error_log("Public key e: " . $e);
+            error_log("Public key n: " . $n);
+            
+            $v = $this->mod_pow($signature_decimal, $e, $n);
+            error_log("Verification value v: " . $v);
+            
+            $payload_hash = hash('sha256', $payload, true);
+            error_log("Payload hash (hex): " . bin2hex($payload_hash));
+            
+            $payload_hash_decimal = $this->binary_to_decimal($payload_hash);
+            error_log("Payload hash decimal: " . $payload_hash_decimal);
+            
+            $result = (strcmp($v, $payload_hash_decimal) === 0);
+            error_log("Verification result: " . ($result ? "true" : "false"));
+            
+            return $result;
+        } catch (Exception $e) {
+            error_log("Error in verify_signature: " . $e->getMessage());
             return false;
         }
-        return true;
+    }
+
+    public function base64_to_decimal($base64) {
+        $binary = base64_decode($base64);
+        return $this->binary_to_decimal($binary);
+    }
+
+    public function binary_to_decimal($binary) {
+        $hex = bin2hex($binary);
+        error_log("Converting hex to decimal: " . $hex);
+        $dec = '0';
+        $len = strlen($hex);
+        for ($i = 0; $i < $len; $i++) {
+            $dec = bcmul($dec, '16');
+            $dec = bcadd($dec, hexdec($hex[$i]));
+        }
+        return $dec;
+    }
+
+    public function mod_pow($base, $exponent, $modulus) {
+        $base = (string)$base;
+        $exponent = (string)$exponent;
+        $modulus = (string)$modulus;
+        
+        error_log("mod_pow inputs - base: " . $base . ", exponent: " . $exponent . ", modulus: " . $modulus);
+        
+        if (function_exists('gmp_powm')) {
+            $result = gmp_strval(gmp_powm(gmp_init($base), gmp_init($exponent), gmp_init($modulus)));
+            error_log("mod_pow result (gmp): " . $result);
+            return $result;
+        }
+        
+        if (function_exists('bcpowmod')) {
+            $result = bcpowmod($base, $exponent, $modulus);
+            error_log("mod_pow result (bcpowmod): " . $result);
+            return $result;
+        }
+        
+        throw new Exception("Neither GMP nor BC Math is available for large number operations");
+    }
+
+    public function check_api_key($request) {
+        error_log("=== Starting API key check ===");
+        $signature = $request->get_header('X-Shopino-Signature');
+        if (empty($signature)) {
+            error_log("Missing signature header");
+            return false;
+        }
+        error_log("Received signature: " . $signature);
+
+        if ($request->get_method() === 'GET') {
+            $params = $request->get_query_params();
+            if (empty($params)) {
+                error_log("Empty query parameters for GET request");
+                return false;
+            }
+            ksort($params);
+            $payload = http_build_query($params);
+            error_log("GET request payload (sorted query params): " . $payload);
+        } else {
+            $payload = $request->get_body();
+            if (empty($payload)) {
+                error_log("Empty request payload");
+                return false;
+            }
+            error_log("POST request payload: " . $payload);
+        }
+
+        return $this->verify_signature($payload, $signature);
     }
 
     public function check_woocommerce() {
