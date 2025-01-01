@@ -8,18 +8,15 @@ from urllib.parse import urlencode
 import time
 import sys
 
-WORDPRESS_URL = "http://localhost:8080"  
-API_ENDPOINT = f"{WORDPRESS_URL}/wp-json/api/v1/products"
+API_ENDPOINT = "http://localhost:8080/wp-json/api/v1/products"
 
 def load_private_key():
-    """Load and return the private key with better error handling"""
     try:
         with open('private.pem', 'rb') as key_file:
             key_contents = key_file.read()
-            print("Key file contents:", key_contents.decode('utf-8'))  # Print full contents
+            print("Key file contents:", key_contents.decode('utf-8')) 
             
             try:
-                # Try loading without password first
                 return serialization.load_pem_private_key(
                     key_contents,
                     password=None,
@@ -27,7 +24,6 @@ def load_private_key():
                 )
             except ValueError as e:
                 print(f"Error loading key without password: {e}")
-                # Try to parse the key format
                 if b"BEGIN PRIVATE KEY" in key_contents:
                     print("Key appears to be in PKCS#8 format")
                 elif b"BEGIN RSA PRIVATE KEY" in key_contents:
@@ -35,7 +31,6 @@ def load_private_key():
                 else:
                     print("Key format not recognized")
                 
-                # If that fails, try with empty string password
                 return serialization.load_pem_private_key(
                     key_contents,
                     password=b"",
@@ -49,7 +44,6 @@ def load_private_key():
         print("Please ensure private.pem is in the correct format and has proper permissions")
         sys.exit(1)
 
-# Load the private key at startup
 try:
     private_key = load_private_key()
     print("Successfully loaded private key")
@@ -58,20 +52,15 @@ except Exception as e:
     sys.exit(1)
 
 def sign_payload(payload: str, private_key) -> str:
-    """Sign the payload and return base64 encoded signature"""
     if isinstance(payload, str):
         payload = payload.encode('utf-8')
     
-    print(f"Payload being signed: {payload}")
-    
-    # Create SHA256 hash of the payload
     digest = hashes.Hash(hashes.SHA256())
     digest.update(payload)
     payload_hash = digest.finalize()
     
     print(f"Payload hash (hex): {payload_hash.hex()}")
     
-    # Sign the hash
     signature = private_key.sign(
         payload,
         padding.PKCS1v15(),
@@ -85,18 +74,15 @@ def sign_payload(payload: str, private_key) -> str:
     return encoded_sig
 
 def get_products():
-    # Create query parameters
     params = {
         'page': 1,
         'per_page': 10,
         'timestamp': str(int(time.time()))
     }
     
-    # Create canonical string from sorted parameters
     canonical_string = urlencode(sorted(params.items()))
     print(f"\nCanonical string: {canonical_string}")
     
-    # Sign the canonical string
     signature = sign_payload(canonical_string, private_key)
     
     headers = {
