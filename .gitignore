@@ -1,5 +1,4 @@
 .DS_Store
-/venv
 venv/
 /private.pem
 /public.pem
