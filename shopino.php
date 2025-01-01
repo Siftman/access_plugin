@@ -285,9 +285,7 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
 
             $status = isset($params['status']) ? $params['status'] : 'pending';
             $order->set_status($status);
-
             $order->calculate_totals();
-
             $order->save();
 
             return [
@@ -327,10 +325,10 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
             $webhook_ids = [];
 
             $topics = ['product.created', 'product.updated', 'product.deleted', 'product.restored'];
-
             foreach ($topics as $topic) {
                 if (isset($existing_webhooks[$topic])) {
                     $webhook = wc_get_webhook($existing_webhooks[$topic]['id']);
+                    // todo: check name
                     if ($webhook && $webhook->get_status() === 'active') {
                         $webhook_ids[$topic] = [
                             'id' => $existing_webhooks[$topic]['id'],
@@ -340,32 +338,26 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                     }
                 }
 
-                $max_retries = 5;
-                $retry_count = 0;
-                $user_id = null;
+                $admin_users = get_users([
+                    'role' => 'administrator',
+                    'number' => 1,
+                    'fields' => ['ID']
+                ]);
 
-                while ($retry_count < $max_retries && !is_numeric($user_id)) {
-                    $username = 'shopino_webhook_' . time() . '_' . $retry_count;
-                    $user_result = wp_create_user($username, wp_generate_password(), $username . '@example.com');
-
-                    if (!is_wp_error($user_result)) {
-                        $user_id = $user_result;
-                        $user = new WP_User($user_id);
-                        $user->add_cap('read');
-                        $user->add_cap('manage_woocommerce');
-                        $user->add_cap('read_private_products');
-                        break;
-                    } else {
-                        error_log('Failed to create user: ' . $user_result->get_error_message());
-                        $retry_count++;
-                        if ($retry_count < $max_retries) {
-                            sleep(1);
-                        }
-                    }
+                if (!empty($admin_users)) {
+                    $user_id = $admin_users[0]->ID;
+                    error_log('Using admin user ID: ' . $user_id . ' for webhook creation');
+                } else {
+                    error_log('No admin users found');
+                    return new WP_Error(
+                        'no_admin_user',
+                        'No administrator user found in the system.',
+                        ['status' => 502]
+                    );
                 }
 
                 if (!is_numeric($user_id)) {
-                    error_log("User creation failed after {$max_retries} attempts for topic: " . $topic);
+                    error_log("User creation failed for topic: " . $topic);
                     return new WP_Error(
                         'user_creation_failed',
                         'User creation failed after multiple attempts.',
@@ -381,7 +373,6 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                 $webhook->set_secret($secret);
                 $webhook->set_api_version('wp_api_v2');
                 $webhook->set_user_id($user_id);
-                
                 $webhook->save();
                 $webhook_id = $webhook->get_id();
 
@@ -390,53 +381,6 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
                     throw new Exception('Failed to create webhook for ' . $topic);
                 }
 
-                $domain_name = parse_url(home_url(), PHP_URL_HOST);
-                $payload = json_encode([
-                    'webhook_id' => $webhook_id,
-                    'domain_name' => $domain_name
-                ]);
-                $delivery_id = time();
-                
-                $args = [
-                    'method' => 'POST',
-                    'timeout' => 60,
-                    'redirection' => 5,
-                    'httpversion' => '1.0',
-                    'blocking' => true,
-                    'body' => $payload,
-                    'headers' => [
-                        'Content-Type' => 'application/json',
-                        'X-WC-Webhook-Source' => home_url('/'),
-                        'X-WC-Webhook-Topic' => $topic,
-                        'X-WC-Webhook-Resource' => 'product',
-                        'X-WC-Webhook-Event' => 'ping',
-                        'X-WC-Webhook-Signature' => base64_encode(hash_hmac('sha256', $payload, $secret, true)),
-                        'X-WC-Webhook-ID' => $webhook_id,
-                        'X-WC-Webhook-Delivery-ID' => $delivery_id,
-                    ],
-                ];
-                
-                $response = wp_remote_post($webhook->get_delivery_url(), $args);
-                
-                if (is_wp_error($response)) {
-                    error_log("Initial ping failed for webhook ID " . $webhook_id . ": " . $response->get_error_message());
-                    $webhook->delete(true);
-                    continue;
-                }
-                
-                $response_code = wp_remote_retrieve_response_code($response);
-                error_log("Initial ping response for webhook ID " . $webhook_id . ": " . $response_code);
-                error_log("Initial ping response body: " . wp_remote_retrieve_body($response));
-
-                if ($response_code !== 200) {
-                    error_log("Webhook ping failed with status " . $response_code . ". Not creating any webhooks.");
-                    $webhook->delete(true);
-                    return new WP_Error(
-                        'webhook_creation_failed',
-                        'Webhook creation failed due to server error.',
-                        ['status' => 502]
-                    );
-                }
 
                 $webhook_ids[$topic] = [
                     'id' => $webhook_id,
@@ -461,7 +405,6 @@ class CustomAPIEndpoints extends ShopinoBaseAPI {
             ];
             error_log("Response: " . json_encode($response));
             return rest_ensure_response($response);
-
         } catch (Exception $e) {
             return new WP_Error(
                 'webhook_creation_failed',

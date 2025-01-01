@@ -114,5 +114,138 @@ def get_products():
             print(f"Response Status: {e.response.status_code}")
             print(f"Response Body: {e.response.text}")
 
+def create_order(billing, line_items, shipping=None, payment_method=None, status='pending'):
+    """
+    Create a new order via the API
+    """
+    order_endpoint = "http://localhost:8080/wp-json/api/v1/order"
+    
+    payload = {
+        'billing': billing,
+        'line_items': line_items
+    }
+    
+    if shipping:
+        payload['shipping'] = shipping
+    if payment_method:
+        payload['payment_method'] = payment_method
+    if status:
+        payload['status'] = status
+        
+    payload_str = json.dumps(payload)
+    print(f"\nPayload: {payload_str}")
+    
+    signature = sign_payload(payload_str, private_key)
+    
+    headers = {
+        'X-Shopino-Signature': signature,
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        print(f"\nMaking request to: {order_endpoint}")
+        print(f"With signature: {signature}")
+        
+        response = requests.post(
+            order_endpoint,
+            data=payload_str,
+            headers=headers,
+            verify=False
+        )
+        
+        response.raise_for_status()
+        
+        print("\nResponse Status:", response.status_code)
+        print("Response Body:", response.json())
+        
+        return response.json()
+        
+    except requests.exceptions.RequestException as e:
+        print(f"\nError occurred: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response Status: {e.response.status_code}")
+            print(f"Response Body: {e.response.text}")
+        raise
+
+def create_webhook(secret):
+    webhook_endpoint = "https://caseplus.ir/wp-json/api/v1/webhook-key"
+    
+    payload = {
+        'secret': secret
+    }
+    
+    payload_str = json.dumps(payload)
+    print(f"\nPayload: {payload_str}")
+    
+    signature = sign_payload(payload_str, private_key)
+    
+    headers = {
+        'X-Shopino-Signature': signature,
+        'Content-Type': 'application/json',
+        'User-Agent': 'Shopino-Webhook-Creator/1.0',
+        'Accept': 'application/json'
+    }
+    
+    try:
+        print(f"\nMaking request to: {webhook_endpoint}")
+        print(f"With signature: {signature}")
+        
+        response = requests.post(
+            webhook_endpoint,
+            data=payload_str,
+            headers=headers,
+            verify=False
+        )
+        
+        response.raise_for_status()
+        
+        print("\nResponse Status:", response.status_code)
+        print("Response Body:", response.json())
+        
+        return response.json()
+        
+    except requests.exceptions.RequestException as e:
+        print(f"\nError occurred: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response Status: {e.response.status_code}")
+            print(f"Response Body: {e.response.text}")
+        raise
+
 if __name__ == "__main__":
-    get_products() 
+    webhook_secret = "local_host"
+    create_webhook(webhook_secret)
+    
+    # sample_order = {
+    #     'billing': {
+    #         'first_name': 'John',
+    #         'last_name': 'Doe',
+    #         'address_1': '123 Main St',
+    #         'city': 'Sample City',
+    #         'state': 'ST',
+    #         'postcode': '12345',
+    #         'country': 'US',
+    #         'email': 'john@example.com',
+    #         'phone': '123-456-7890'
+    #     },
+    #     'line_items': [
+    #         {
+    #             'product_id': 123,  # Replace with actual product ID
+    #             'quantity': 2
+    #         }
+    #     ],
+    #     'shipping': {
+    #         'first_name': 'John',
+    #         'last_name': 'Doe',
+    #         'address_1': '123 Main St',
+    #         'city': 'Sample City',
+    #         'state': 'ST',
+    #         'postcode': '12345',
+    #         'country': 'US'
+    #     }
+    # }
+    
+    # Uncomment to test create_order
+    # create_order(**sample_order)
+    
+    # Get products
+    # get_products() 
